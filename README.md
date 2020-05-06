@@ -1,2 +1,2 @@
-# flappy_bird
-Flappy Bird game AI using PyGame and NEAT
+# tank_game_ai
+Tank battle game where you can play against a trained bot
