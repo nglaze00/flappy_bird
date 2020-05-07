@@ -18,9 +18,10 @@ from pygame.locals import (
 )
 
 COLORS = [(255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0), (255, 0, 255), (0, 255, 255), (0, 0, 0)]
-SCREEN_SIZE = 300
-NUM_H, NUM_B = 0, 5
+SCREEN_SIZE = 400
+NUM_H = 0
 GAME_LENGTH = 5_000
+# HIT_BONUS = 0.1
 FRAMERATE = 60
 
 N_LIVES = 5
@@ -64,7 +65,7 @@ def make_tanks(models, genomes):
         all.add(tank)
         b.add(tank)
         i += 1
-    print(len(all), len(genomes))
+
     return {tank.id: tank for tank in all}, h, b, all
 
 class Bullet(pygame.sprite.Sprite):
@@ -83,8 +84,6 @@ class Bullet(pygame.sprite.Sprite):
             self.vector = vector
         else:
             self.vector = np.multiply(vector, BULLET_SPEED / mag)
-
-
     def move(self):
         self.rect.move_ip(*self.vector)
     def collides_with_wall(self):
@@ -104,24 +103,28 @@ class Tank(pygame.sprite.Sprite):
         self.reloaded = 0
         self.lives = N_LIVES
         self.id = index
-
     def move(self, *vector):
         mag = magnitude(vector)
         if mag == 0:
             norm_vector = vector
         else:
             norm_vector = np.multiply(vector, TANK_SPEED / mag)
-        self.rect.move_ip(*norm_vector)
-        self.last_vector = norm_vector
 
-    def check_move(self, presses):
-        if presses[K_w] and self.rect.top >= 0:
+        self.vector = norm_vector
+
+
+
+        self.rect.move_ip(*np.round(self.vector))
+        # assert a[0] != self.rect[0] or a[1] != self.rect[1]
+    def keyboard_move(self, presses):
+
+        if presses[K_w]:
             self.move(0, -1)
-        if presses[K_s] and self.rect.bottom < SCREEN_SIZE:
+        if presses[K_s]:
             self.move(0, 1)
-        if presses[K_a] and self.rect.left >= 0:
+        if presses[K_a]:
             self.move(-1, 0)
-        if presses[K_d] and self.rect.right < SCREEN_SIZE:
+        if presses[K_d]:
             self.move(1, 0)
 
     def reload(self):
@@ -149,28 +152,15 @@ class AI_Tank(Tank):
         inputs = np.concatenate((self.rect.center, np.subtract(closest_tank[:2], self.rect.center), closest_tank[2:], np.subtract(closest_bullet[:2], self.rect.center), closest_bullet[2:]))
 
         guess = self.model.activate(inputs)
+        # guess = [1, 1, 1, 1]
         tank_vector, bullet_vector = guess[:2], guess[2:] # both should have magnitude 1
-        # print(tank_vector, bullet_vector)
-        # if sum(np.abs(bullet_vector)) < 1.9:
-        #     print(bullet_vector)
-        # bullet_vector = np.subtract(closest_tank[:2], self.rect.center)
-        return tank_vector, bullet_vector
 
-    def check_move(self, vector):
-        if vector[1] < 0 and self.rect.top < 0:
-            vector[1] = 0
-        if vector[1] > 0 and self.rect.bottom > SCREEN_SIZE:
-            vector[1] = 0
-        if vector[0] < 0 and self.rect.left < 0:
-            vector[0] = 0
-        if vector[0] > 0 and self.rect.right < SCREEN_SIZE:
-            vector[0] = 0
-        self.move(*vector)
+        return tank_vector, bullet_vector
 
     def act(self, tanks_all, bullets):
         tank_vector, bullet_vector = self.eval(tanks_all, bullets)
 
-        self.check_move(list(tank_vector))
+        self.move(*tank_vector)
         return self.fire_bullet(bullet_vector)
 
     def fire_bullet(self, bullet_vector):
@@ -189,6 +179,22 @@ class AI_Tank(Tank):
 
 def rand_pos():
     return np.random.randint(SCREEN_SIZE, size=2)
+def border_pass(sprite):
+    out = False
+    if sprite.rect.x < 0:
+        out = True
+        sprite.rect.move_ip(SCREEN_SIZE, 0)
+    elif sprite.rect.x > SCREEN_SIZE:
+        out = True
+        sprite.rect.move_ip(-SCREEN_SIZE, 0)
+    if sprite.rect.y < 0:
+        out = True
+        sprite.rect.move_ip(0, SCREEN_SIZE)
+    elif sprite.rect.y > SCREEN_SIZE:
+        out = True
+        sprite.rect.move_ip(0, -SCREEN_SIZE)
+    if out and type(sprite) == Bullet:
+        sprite.kill()
 
 def play(genomes, config):
     models = []
@@ -213,7 +219,8 @@ def play(genomes, config):
     clock = pygame.time.Clock()
     running = True
     game_length = 0 # 1300 = shortest game
-    while len(tanks_b) > 1 and game_length < GAME_LENGTH:
+    while len(tanks_all) > 1 and game_length < GAME_LENGTH:
+
         for event in pygame.event.get():
             screen.fill((255, 255, 255))
             if event.type == KEYDOWN:
@@ -234,40 +241,33 @@ def play(genomes, config):
 
         screen.fill((255, 255, 255))
 
-        # draw
-        for tank in tanks_all:
-            screen.blit(tank.surf, tank.rect)
-        for bullet in bullets:
-            screen.blit(bullet.surf, bullet.rect)
-        pygame.display.flip()
-
-        # move human tanks
         presses = pygame.key.get_pressed()
-        for tank in tanks_h:
-            tank.check_move(presses)
-            tank.reload()
-
-        # move bot tanks
-        for tank in tanks_b:
-            bullet = tank.act(tanks_b, bullets)
-            if bullet:
-                bullets.add(bullet)
-            tank.reload()
-
-
-        # check for bullet collisions
-        for id, tank in enumerate(tanks_all):
+        # draw + move tanks
+        for tank in tanks_all:
+            border_pass(tank)
+            if type(tank) == Tank:
+                tank.keyboard_move(presses)
+                tank.reload()
+            elif type(tank) == AI_Tank:
+                bullet = tank.act(tanks_all, bullets)
+                if bullet:
+                    bullets.add(bullet)
+                tank.reload()
             for bullet in bullets:
                 if pygame.sprite.collide_rect(tank, bullet) and tank.id != bullet.owner:
                     bullet.kill()
                     tank.hurt(tanks_all)
-                    tank_id_map[bullet.owner].genome.fitness += 0.02
+                    tank_id_map[bullet.owner].lives += 1
+                    # tank_id_map[bullet.owner].genome.fitness += HIT_BONUS
+            screen.blit(tank.surf, tank.rect)
 
-        # move bullets
         for bullet in bullets:
             bullet.move()
-            if bullet.collides_with_wall():
-                bullet.kill()
+            # border_pass(bullet)
+
+            screen.blit(bullet.surf, bullet.rect)
+        pygame.display.flip()
+
 
 
         screen.fill((255,255,255))
@@ -276,10 +276,10 @@ def play(genomes, config):
         if game_length % 1000 == 0:
             print(game_length)
 
-    if len(tanks_b) > 1: # if took too long
+    if len(tanks_all) > 1: # if took too long
         max_lives = 0
         id = -1
-        for tank in tanks_b:
+        for tank in tanks_all:
             if tank.lives > max_lives:
                 id = tank.id
                 max_lives = tank.lives
@@ -305,10 +305,10 @@ def run_neat(config_file):
     p.add_reporter(neat.StdOutReporter(True))
     stats = neat.StatisticsReporter()
     p.add_reporter(stats)
-    #p.add_reporter(neat.Checkpointer(5))
+    p.add_reporter(neat.Checkpointer(5))
 
-    # Run for up to 50 generations.
-    winner = p.run(play, 50)
+    # Run for up to 20 generations.
+    winner = p.run(play, 10)
 
     # show final stats
     print('\nBest genome:\n{!s}'.format(winner))
@@ -320,7 +320,7 @@ def run_neat(config_file):
 #   desired tank vector (dx, dy)
 #   desired bullet vector (dx, dy)
 
-# print(play([0,0,0,0,0]))
+# print(play([], None))
 
 run_neat('config-feedforward.txt')
 
