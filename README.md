@@ -1,2 +1,2 @@
 # tank_game_ai
-Tank battle game where you can play against a trained bot
+Tank war game. Play against other humans or an AI (trained using NEAT)
